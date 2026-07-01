@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from db.schema import SessionLocal
 
 
-from services.authService import UserLoginService
+from services.authService import UserLoginService, UserRegiserService
 
 auth = APIRouter()
 
@@ -119,12 +119,15 @@ def refresh_session(a_token = Cookie(alias="access_token", default=None),
                    service: UserLoginService = Depends()):
     
     if not _tokens_validity(a_token, r_token):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="JWT Doesn't Exist")
+            raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="JWT Doesn't Exist")
     
     token = service.refresh(a_token, r_token)
-    result = { "message": "Successfull JWT Refresh." }
 
-    response = JSONResponse(content=result)
+    response = JSONResponse(
+                content={ "message": "Successfull JWT Refresh." })
+    
     response.set_cookie(key='access_token', value=token, httponly=True,
                         secure=True, samesite="strict", max_age=30*60)
 
@@ -134,19 +137,20 @@ def refresh_session(a_token = Cookie(alias="access_token", default=None),
 @auth.post('/auth/register', status_code=status.HTTP_202_ACCEPTED)
 def register_user(post: UserRegistration, req: Request,
                  db: Session = Depends(get_db),
-                 service: UserLoginService = Depends()):
+                 service: UserRegiserService = Depends()):
     
     a_token = req.cookies.get('access_token')
     r_token = req.cookies.get('refresh_token')
     
     if _tokens_validity(a_token, r_token):
-        raise HTTPException(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, detail='Log out first')             # weird check are you sure it would work?
+        raise HTTPException(
+                    status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+                    detail='Log out first')                         # weird check are you sure it would work?
 
     uip = _get_ip_address(req)
 
-    result = service.register(post, uip, db)
-
-    # response = JSONResponse(content=data)
+    result = service.signup(post, uip, db)
+    response = JSONResponse(content=result)
 
     return response
     

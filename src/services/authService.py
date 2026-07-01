@@ -42,13 +42,14 @@ class UserLoginService:
             d_model = json.dumps(model.as_dict())
 
             redis_session.hset_exp('user', uip, 'login',
-                                   mapping = {
+                                  mapping = {
                                             'access_code': a_code,
                                             'progress_key': 1,
                                             'model': d_model },
-                                   time=60*15)
+                                  time=60*15)
             
             return {"message": "Flow was started. Keep onto the next step"}
+        
         else:
             a_payload = _create_jwt_payload(**{'sub': uuid, 'name': creds,
                                            'role': role, 'root': root})
@@ -117,7 +118,7 @@ class UserRegiserService:
     def __init__(self):
         ...
 
-    def register(post: UserRegistration, uip: str, db: Session) -> dict:
+    def signup(post: UserRegistration, uip: str, db: Session) -> dict:
         
         uname = post.username.value
         email = post.email.value
@@ -125,31 +126,45 @@ class UserRegiserService:
         uname, email = _normz(uname, email)
 
         if _get_user_by_context(uname, db):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already taken")
+            raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Username already taken")
     
         if _get_user_by_context(email, db):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already taken") 
+            raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Email already taken") 
 
-        vcode = _gen_access_code()
+        a_code = _gen_access_code()
+        d_model = post_arg.model_dump_json()
 
-        redis_session.hset_exp(name='user', ip=uip, operation='register',
-                              time=60*15, mapping={'access_code':f'{vcode}', 'user_object':post_arg.model_dump_json(), 
-                                                                                                          'progress_key': 1})
+        redis_session.hset_exp('user', uip, 'register',
+                              mapping = {
+                                        'access_code': a_code, 
+                                        'progress_key': 1,
+                                        'user_object': d_model},
+                              time=60*15)
+                                                                                                          
+        return {"message": "Successful Registration",
+                "signup_completed_at": datetime.now(timezone.utc).isoformat()}
 
-        return { "issued": datetime.now(timezone.utc).isoformat() }
-
-
-# def register(post_arg: UserRegistration, req: Request, db_arg: Session) -> set:
-
-#     user, email = _normz(post_arg.username.value, post_arg.email.value)
-#     _user_presence(username=user, email=email, db=db_arg)
-
+    def mfa(post: str, uip: str, db: Session):
+        if not _verify_redis_key(uip, 'register'):
+            raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail='r_key')
     
-#     generated_code = _gen_access_code()
+        if not _verify_progress_key(alleged_key=1, ip=user_ip, operation='register'):
+            raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail='p_key')
+    
+        if not _verify_access_code(code=code_arg.value, ip=user_ip, operation='register'):
+            raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail='a_c')
 
-#     redis_session.set_hash_with_time_expirity(name='user', ip=user_ip, operation='register', time=60*15, mapping={'access_code':f'{generated_code}', 'user_object':post_arg.model_dump_json(), 
-#                                                                                                           'progress_key': 1})
-#     return {"issued": datetime.now(timezone.utc).isoformat()}
+
 
 def reg_mfa(code_arg: str, request_arg: Request, db_arg: Session):
     user_ip = _get_ip_address(request_arg)
