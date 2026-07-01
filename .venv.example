@@ -1,0 +1,2 @@
+DB_URL=sqlite:////./storage/files/data.db
+CACHE_DB_URL=sqlite:////./storage/files/cache.db

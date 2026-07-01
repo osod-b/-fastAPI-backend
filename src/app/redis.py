@@ -11,7 +11,7 @@ class RedisSession():
     def __initialize_session(self, password):
         return redis.Redis(host='localhost', port=6379, db=0, decode_responses=True, max_connections=4, password=password)
     
-    def set_hash_with_time_expirity(self, name: str, ip: str, operation: str, mapping: dict, time: int):
+    def hset_exp(self, name: str, ip: str, operation: str, mapping: dict, time: int):
         self.set_hash(name, ip, operation, mapping)
         self.set_hash_expirity(name, ip, operation, time)
 
@@ -26,13 +26,13 @@ class RedisSession():
     def set_single_hash_value(self, name: str, ip: str, operation: str, inner_key, value):
         self.redis_session.hset(name=f'{name}={ip}[{operation}]', key=inner_key, value=value)
 
-    def get_single_value(self, name: str, ip: str, operation: str, inner_key):
+    def hget(self, name: str, ip: str, operation: str, inner_key):
         return self.redis_session.hget(name=f'{name}={ip}[{operation}]', key=inner_key)
 
     def get_whole_hash(self, name: str, ip: str, operation: str) -> dict:
         return self.redis_session.hgetall(name=f'{name}={ip}[{operation}]')
     
-    def clean_hash_by_key(self, name: str, ip: str, operation: str):
+    def hdel(self, name: str, ip: str, operation: str):
         self.redis_session.delete(f'{name}={ip}[{operation}]')
         return
     
@@ -40,7 +40,7 @@ class RedisSession():
     #     self.redis_session.get
     
 
-r_s = RedisSession(password='123')
+redis_session = RedisSession(password='123')
 
 #ttl for redis session
 #PASSWORDS

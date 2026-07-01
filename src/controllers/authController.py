@@ -1,11 +1,15 @@
-from services.authService import login, register, logout, forgot_pwd, vrf_code, reset_pwd, reg_mfa, refresh, login_mfa
-from fastapi import APIRouter, Depends, Cookie, Request, status
+from services.authService import login, register, logout, forgot_pwd, vrf_code, reset_pwd, reg_mfa, refresh, login_mfa, _get_ip_address
+from services.jwtService import _tokens_validity
+from fastapi import APIRouter, Depends, Cookie, Request, status, HTTPException
 from validators.users import VerificationalCode, EmailValidator, PasswordValidator
 from schemas.user import UserLogin, UserRegistration
 from datetime import datetime, timezone
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from db.schema import SessionLocal
+
+
+from services.authService import UserLoginService
 
 auth = APIRouter()
 
@@ -33,55 +37,118 @@ def get_db():
 #this second endpoint takes this code insterted and then varifies it with the code in endpoint
 
 
+#emails out, token out
+#exclude .env + cahces
+
 @auth.post('/auth/login', status_code=status.HTTP_200_OK)
-def login_user(post: UserLogin, request: Request, database: Session = Depends(get_db)):
-    result = login(post_arg=post, request_arg=request, db_arg=database)
-    if result:
+def login_user(
+        post: UserLogin, req: Request, db: Session = Depends(get_db), 
+        service: UserLoginService = Depends()):
+    
+    a_token = req.cookies.get('access_token')
+    r_token = req.cookies.get('refresh_token')
+
+    if _tokens_validity(a_token, r_token):
+        raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, 
+                    detail='Already Logged In')
+    
+    uip = _get_ip_address(req)
+    
+    result = service.login(post, uip, db)
+
+    if isinstance(result, dict):
+        response = JSONResponse(content=result)
+    elif isinstance(result, tuple):
         a_token, r_token = result
 
-        response = JSONResponse(content = {"message": "Login successful. JWT Saved."})
-        response.set_cookie(key="access_token", value=a_token, httponly=True, secure=True, samesite="strict", max_age=30*60)
-        response.set_cookie(key="refresh_token", value = r_token, httponly=True, secure=True, samesite="strict", max_age=7*24*60*60)
+        response = JSONResponse(
+                    content = {"message": "Successful Log In. JWT Saved"})
+        
+        response.set_cookie(key="access_token", value=a_token, httponly=True,
+                            secure=True, samesite="strict", max_age=30*60)
+        
+        response.set_cookie(key="refresh_token", value = r_token, httponly=True,
+                            secure=True, samesite="strict", max_age=7*24*60*60)
 
-        return response
-    
-    return JSONResponse(content={"message":"Code was sent, proceed further"}, status_code=status.HTTP_202_ACCEPTED)
+    return response
+
 
 @auth.post('/auth/login/activate_email', status_code=status.HTTP_200_OK)
-def login_activate(code: VerificationalCode, request: Request, database: Session = Depends(get_db)):
-    a_token, r_token = login_mfa(code_arg=code, request_arg=request, db_arg=database)
+def mfa_user(
+        post: VerificationalCode, req: Request, db: Session = Depends(get_db),
+        service: UserLoginService = Depends()):
     
-    response = JSONResponse(content = {"message": "Login successful. JWT Saved."})
-    response.set_cookie(key="refresh_token", value=r_token, httponly=True, secure=True, samesite="strict", max_age=7*24*60*60)
-    response.set_cookie(key="access_token", value=a_token, httponly=True, secure=True, samesite="strict", max_age=30*60)
+    uip = _get_ip_address(req)
+
+    result = service.mfa(post, uip, db)
+    a_token, r_token = result
+
+    response = JSONResponse(
+                content = { "message": "Successful Log In. JWT Saved" })
+    
+    response.set_cookie(key="access_token", value=a_token, httponly=True,
+                        secure=True, samesite="strict", max_age=30*60)
+    
+    response.set_cookie(key="refresh_token", value=r_token, httponly=True,
+                        secure=True, samesite="strict", max_age=7*24*60*60)
     
     return response
 
-@auth.post('/auth/refresh', status_code=status.HTTP_200_OK)
-def refresh_session(access_token = Cookie(alias="access_token", default=None), refresh_token = Cookie(alias="refresh_token", default=None)):
-    new_access_token = refresh(access_token_arg=access_token, refresh_token_arg=refresh_token)
-    response = JSONResponse(content={"message":"JWT was updated successfully", "issued": datetime.now(timezone.utc)})
-    response.set_cookie(key='access_token', value=new_access_token, httponly=True, secure=True, samesite="strict", max_age=7*24*60*60)
 
-    return response
-
-@auth.patch('/auth/logout', status_code=status.HTTP_200_OK)
-def logout_user(access_token=Cookie(alias='access_token', default=None), refresh_token=Cookie(alias='refresh_token', default=None)):
-    logout(access_token_arg=access_token, refresh_token_arg=refresh_token)
+@auth.post('/auth/logout', status_code=status.HTTP_200_OK)
+def logout_user(a_token=Cookie(alias='access_token', default=None),
+                r_token=Cookie(alias='refresh_token', default=None)):
     
-    response = JSONResponse(content={
-        "issued": datetime.now(timezone.utc).isoformat(),
-        "message": "Log out successfully"
-    })
+    if not _tokens_validity(a_token, r_token):
+            raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Isn't Logged In")
+
+    response = JSONResponse(content = { "message": "Log Out." })
+
     response.delete_cookie("access_token")
     response.delete_cookie("refresh_token")
+
+    return response                                                             #deleted jwt cookies isn't providing complete log out
+
+
+@auth.post('/auth/refresh', status_code=status.HTTP_200_OK)                     #when is this function forced
+def refresh_session(a_token = Cookie(alias="access_token", default=None),
+                   r_token = Cookie(alias="refresh_token", default=None),
+                   service: UserLoginService = Depends()):
+    
+    if not _tokens_validity(a_token, r_token):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="JWT Doesn't Exist")
+    
+    token = service.refresh(a_token, r_token)
+    result = { "message": "Successfull JWT Refresh." }
+
+    response = JSONResponse(content=result)
+    response.set_cookie(key='access_token', value=token, httponly=True,
+                        secure=True, samesite="strict", max_age=30*60)
+
     return response
 
-@auth.post('/auth/register', status_code=status.HTTP_202_ACCEPTED)
-def register_user(post: UserRegistration, request: Request, database: Session = Depends(get_db)):
-    data = register(post_arg=post, request_arg=request, db_arg=database)
 
-    return JSONResponse(content=data)
+@auth.post('/auth/register', status_code=status.HTTP_202_ACCEPTED)
+def register_user(post: UserRegistration, req: Request,
+                 db: Session = Depends(get_db),
+                 service: UserLoginService = Depends()):
+    
+    a_token = req.cookies.get('access_token')
+    r_token = req.cookies.get('refresh_token')
+    
+    if _tokens_validity(a_token, r_token):
+        raise HTTPException(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, detail='Log out first')             # weird check are you sure it would work?
+
+    uip = _get_ip_address(req)
+
+    result = service.register(post, uip, db)
+
+    # response = JSONResponse(content=data)
+
+    return response
     
 @auth.patch('/auth/register/verification', status_code=status.HTTP_200_OK)
 def register_mfa(code: VerificationalCode, request:Request, database: Session = Depends(get_db)):

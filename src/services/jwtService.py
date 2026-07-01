@@ -19,10 +19,10 @@ def jwt_threat() -> None:
 def token_expiration() -> None:
     raise HTTPException(status_code=401, detail="Refresh JWT isn't valid. Provide your credentials again")
 
-def _jwt_payload_schema(ref=False, **kwargs: JWTParams) -> dict:
+def _create_jwt_payload(refresh=False, **kwargs: JWTParams) -> dict:
     payload = {}
 
-    if ref:
+    if refresh:
         payload.update({'type':'refresh_token'})
     else:
         payload.update({'type':'access_token'})
