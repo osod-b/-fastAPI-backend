@@ -7,7 +7,7 @@ docker run -p 8000:8000 app
 Docs: http://localhost:8000/docs
 ```
 
-## .env Variables
+### .env.example variables
 ```
 ...
 ```
